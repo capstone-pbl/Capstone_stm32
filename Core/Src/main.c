@@ -96,8 +96,8 @@
 
 #define GEAR_RATIO 30 // 감속비
 
-#define QUADRATURE 4 // 4체배
-
+#define QUADRATURE 2 // 2체배
+//11*30*2*10바퀴=6600
 #define COUNTS_PER_REV (ENCODER_PPR * GEAR_RATIO * QUADRATURE) // 1320
 
 #define WHEEL_DIAMETER_MM 65.0f
@@ -180,6 +180,7 @@ float error_R = 0, error_R_prev = 0, error_R_sum = 0;
 
 float pid_output_L = 0, pid_output_R = 0;
 
+volatile int16_t encoder_test=0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -346,6 +347,7 @@ int main(void)
 // cat /dev/ttyS0
 //sprintf: 변수 -> 버퍼 (쓰기)
 // sscanf: 버퍼 -> 변수 (읽기 + 쓰기)
+
 		if (cmd_complete)
 
 		{
