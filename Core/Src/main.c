@@ -142,13 +142,13 @@ int rx_idx = 0; // 버퍼 인덱스
 
 int error = 0;
 
-uint32_t target_pwm_value_L = 0;
+int32_t target_pwm_value_L = 0;
 
-uint32_t target_pwm_value_R = 0;
+int32_t target_pwm_value_R = 0;
 
 // 빌드 에러 해결을 위한 선언
 
-volatile cmd_complete = 0; // 패킷 수신 완료 플래그
+volatile int cmd_complete = 0; // 패킷 수신 완료 플래그
 
 float target_rpm_L = 0.0; // 왼쪽 목표 속도 (에러 해결)
 
@@ -172,7 +172,7 @@ float RPM_R = 0.0;
 
 //제어기 게인
 
-float Kp = 0.1f, ki = 0.1f, kd = 0.0f;
+float Kp = 1.4f, ki = 1.42f, kd = 0.3f;
 
 float error_L = 0, error_L_prev = 0, error_L_sum = 0;
 
@@ -1290,9 +1290,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 		/*------------엔코더 읽기&&피드백RPM 계산(UART)-------------------*/
 
-		error_L = fabs(target_rpm_L) - fabs(RPM_L);
+		error_L = (target_rpm_L) - (RPM_L);
 
-		error_R = fabs(target_rpm_R) - fabs(RPM_R);
+		error_R = (target_rpm_R) - (RPM_R);
 
 // I항 누적
 
@@ -1312,16 +1312,16 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		if (error_R_sum < -2000)
 			error_R_sum = -2000;
 
-		pid_output_L = (Kp * error_L) + (ki * error_L_sum)
-				+ (kd * (error_L - error_L_prev));
+		pid_output_L = (Kp * error_L) + (ki * error_L_sum*0.05)
+				+ (kd * (error_L - error_L_prev)/0.05);
 
-		pid_output_R = (Kp * error_R) + (ki * error_R_sum)
-				+ (kd * (error_R - error_R_prev));
+		pid_output_R = (Kp * error_R) + (ki * error_R_sum*0.05)
+				+ (kd * (error_R - error_R_prev)/0.05);
 
-		float final_pwm_L = ((fabs(target_rpm_L) / 333.0f) * 999.0f)
+		float final_pwm_L = (((target_rpm_L) / 333.0f) * 999.0f)
 				+ pid_output_L;
 
-		float final_pwm_R = ((fabs(target_rpm_R) / 333.0f) * 999.0f)
+		float final_pwm_R = (((target_rpm_R) / 333.0f) * 999.0f)
 				+ pid_output_R;
 
 		if (final_pwm_L > 999)
