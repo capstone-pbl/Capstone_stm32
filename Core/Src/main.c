@@ -1325,6 +1325,18 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 		float final_pwm_R = (((target_rpm_R) / 333.0f) * 999.0f)
 				+ pid_output_R;
+		HAL_GPIO_WritePin(GPIOB, MOTOR_L_DIR_Pin,
+				(final_pwm_L >= 0) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+
+//모터드라이버의 h-브릿지: 3.3V->정방향(SET) 0V->역방향(RESET)
+
+		HAL_GPIO_WritePin(GPIOB, MOTOR_R_DIR_Pin,
+				(final_pwm_R >= 0) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+
+//rpm -> pwm 변환: 최대 rpm 333, 최대 pwm값 999 => 비율을 구한다음에 999에 곱해서
+
+//흐르는 전류값(모터속도 제어)
+
 
 		final_pwm_L=fabs(final_pwm_L);
 		final_pwm_R=fabs(final_pwm_R);
@@ -1339,17 +1351,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 		target_pwm_value_R = (uint32_t) final_pwm_R;
 
-		HAL_GPIO_WritePin(GPIOB, MOTOR_L_DIR_Pin,
-				(target_rpm_L >= 0) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-
-//모터드라이버의 h-브릿지: 3.3V->정방향(SET) 0V->역방향(RESET)
-
-		HAL_GPIO_WritePin(GPIOB, MOTOR_R_DIR_Pin,
-				(target_rpm_R >= 0) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-
-//rpm -> pwm 변환: 최대 rpm 333, 최대 pwm값 999 => 비율을 구한다음에 999에 곱해서
-
-//흐르는 전류값(모터속도 제어)
 
 		if (target_pwm_value_L > 999)
 			target_pwm_value_L = 999;
