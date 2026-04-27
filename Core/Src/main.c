@@ -1326,17 +1326,14 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		float final_pwm_R = (((target_rpm_R) / 333.0f) * 999.0f)
 				+ pid_output_R;
 
+		final_pwm_L=fabs(final_pwm_L);
+		final_pwm_R=fabs(final_pwm_R);
 		if (final_pwm_L > 999)
 			final_pwm_L = 999;
 
-		if (final_pwm_L < 0)
-			final_pwm_L = 0;
 
 		if (final_pwm_R > 999)
 			final_pwm_R = 999;
-
-		if (final_pwm_R < 0)
-			final_pwm_R = 0;
 
 		target_pwm_value_L = (uint32_t) final_pwm_L;
 
