@@ -181,6 +181,8 @@ float error_R = 0, error_R_prev = 0, error_R_sum = 0;
 float pid_output_L = 0, pid_output_R = 0;
 
 volatile int16_t encoder_test=0;
+volatile float final_pwm_L=0.0f;
+volatile float final_pwm_R=0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -1282,7 +1284,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 		delta_cnt_L = (int16_t) (cnt_now_L - cnt_prev_L);
 
-		delta_cnt_R = (int16_t) (cnt_now_R - cnt_prev_R);
+		delta_cnt_R = -(int16_t) (cnt_now_R - cnt_prev_R);
 
 		RPM_L = ((float) delta_cnt_L / COUNTS_PER_REV)
 				* (60000.0f / SAMPLE_PERIOD_MS);
@@ -1313,25 +1315,35 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 		if (error_R_sum < -2000)
 			error_R_sum = -2000;
+		if (fabs(target_rpm_L) < 0.1f) { // 목표 속도가 0이면
+					error_L_sum = 0;             // 누적 오차 초기화 (중요!)
+					error_L_prev = 0;
+					pid_output_L = 0;
+					final_pwm_L = 0;             // 출력 완전 차단
+				} else {
+					pid_output_L = (Kp * error_L) + (ki * error_L_sum * 0.05f)
+							+ (kd * (error_L - error_L_prev) / 0.05f);
+					final_pwm_L = (((target_rpm_L) / 333.0f) * 999.0f) + pid_output_L;
+				}
 
-		pid_output_L = (Kp * error_L) + (ki * error_L_sum*0.05)
-				+ (kd * (error_L - error_L_prev)/0.05);
-
-		pid_output_R = (Kp * error_R) + (ki * error_R_sum*0.05)
-				+ (kd * (error_R - error_R_prev)/0.05);
-
-		float final_pwm_L = (((target_rpm_L) / 333.0f) * 999.0f)
-				+ pid_output_L;
-
-		float final_pwm_R = (((target_rpm_R) / 333.0f) * 999.0f)
-				+ pid_output_R;
+				// 2. 오른쪽 모터 제어 논리
+				if (fabs(target_rpm_R) < 0.1f) {
+					error_R_sum = 0;
+					error_R_prev = 0;
+					pid_output_R = 0;
+					final_pwm_R = 0;
+				} else {
+					pid_output_R = (Kp * error_R) + (ki * error_R_sum * 0.05f)
+							+ (kd * (error_R - error_R_prev) / 0.05f);
+					final_pwm_R = (((target_rpm_R) / 333.0f) * 999.0f) + pid_output_R;
+				}
 		HAL_GPIO_WritePin(GPIOB, MOTOR_L_DIR_Pin,
 				(final_pwm_L >= 0) ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
 //모터드라이버의 h-브릿지: 3.3V->정방향(SET) 0V->역방향(RESET)
 
 		HAL_GPIO_WritePin(GPIOB, MOTOR_R_DIR_Pin,
-				(final_pwm_R >= 0) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+				(final_pwm_R >= 0) ? GPIO_PIN_RESET : GPIO_PIN_SET);
 
 //rpm -> pwm 변환: 최대 rpm 333, 최대 pwm값 999 => 비율을 구한다음에 999에 곱해서
 
