@@ -225,15 +225,6 @@ MX_TIM10_Init(void);
 
 /* USER CODE BEGIN 0 */
 
-int _write(int file, char *ptr, int len)
-
-{
-
-	HAL_UART_Transmit(&huart2, (uint8_t*) ptr, len, HAL_MAX_DELAY);
-
-	return len;
-
-}
 
 // 엔코더 카운터 읽기 (오버플로 처리 포함)
 
@@ -391,7 +382,7 @@ int main(void)
 
 /**
 
-
+-
 
  * @brief System Clock Configuration
 
@@ -1316,7 +1307,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		if (error_R_sum < -2000)
 			error_R_sum = -2000;
 		if (fabs(target_rpm_L) < 0.1f) { // 목표 속도가 0이면
-					error_L_sum = 0;             // 누적 오차 초기화 (중요!)
+					error_L_sum = 0;             // 누적 오차 초기화
 					error_L_prev = 0;
 					pid_output_L = 0;
 					final_pwm_L = 0;             // 출력 완전 차단
@@ -1326,7 +1317,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 					final_pwm_L = (((target_rpm_L) / 333.0f) * 999.0f) + pid_output_L;
 				}
 
-				// 2. 오른쪽 모터 제어 논리
+				//오른쪽 모터 제어
 				if (fabs(target_rpm_R) < 0.1f) {
 					error_R_sum = 0;
 					error_R_prev = 0;
@@ -1340,7 +1331,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		HAL_GPIO_WritePin(GPIOB, MOTOR_L_DIR_Pin,
 				(final_pwm_L >= 0) ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
-//모터드라이버의 h-브릿지: 3.3V->정방향(SET) 0V->역방향(RESET)
+// 3.3V->정방향(SET) 0V->역방향(RESET)
 
 		HAL_GPIO_WritePin(GPIOB, MOTOR_R_DIR_Pin,
 				(final_pwm_R >= 0) ? GPIO_PIN_RESET : GPIO_PIN_SET);
@@ -1376,12 +1367,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 //방향 핀에 값 인가
 
-		char tx_buf[32];
+		static char tx_buf[32];
 
 		int len = sprintf(tx_buf, "F%.2f,%.2f\n", RPM_L, RPM_R);
-
-		HAL_UART_Transmit(&huart1, (uint8_t*) tx_buf, len, 10);
-
+      if(huart1.gState == HAL_UART_STATE_READY)
+		{
+    	  HAL_UART_Transmit_IT(&huart1, (uint8_t*) tx_buf, len);
+		}
 		error_L_prev = error_L;
 
 		error_R_prev = error_R;
