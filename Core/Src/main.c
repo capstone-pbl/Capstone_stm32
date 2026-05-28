@@ -276,7 +276,7 @@ int main(void)
 
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, PWM_CLOSE);
 	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
-
+	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
 	HAL_UART_Receive_IT(&huart6, &rx_byte, 1);
 
   /* USER CODE END 2 */
