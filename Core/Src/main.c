@@ -103,6 +103,12 @@
 #define SAMPLE_PERIOD_MS 50
 
 #define cmd_timeout_us 500
+#define CMD_OPEN 0x01
+#define CMD_CLOSE 0x02
+
+#define PWM_CLOSE 750
+#define PWM_OPEN 2500
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -119,18 +125,19 @@ TIM_HandleTypeDef htim10;
 
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
+UART_HandleTypeDef huart6;
 
 /* USER CODE BEGIN PV */
-
+volatile uint32_t tim10_cnt = 0;
 volatile uint8_t rx_data; // 1바이트 수신용
 
-char rx_buf[20]; // 패킷 저장 버퍼
-
+volatile char rx_buf[20]; // 패킷 저장 버퍼
+uint8_t rx_byte;
 int rx_idx = 0; // 버퍼 인덱스
 
 int error = 0;
-volatile bool rx_ready=false;
-static char tx_buf[32];
+volatile bool rx_ready = false;
+volatile char tx_buf[32];
 int32_t target_pwm_value_L = 0;
 
 int32_t target_pwm_value_R = 0;
@@ -139,9 +146,9 @@ int32_t target_pwm_value_R = 0;
 
 volatile int cmd_complete = 0; // 패킷 수신 완료 플래그
 
-float target_rpm_L = 0.0; // 왼쪽 목표 속도 (에러 해결)
+volatile float target_rpm_L = 0.0; // 왼쪽 목표 속도 (에러 해결)
 
-float target_rpm_R = 0.0; // 오른쪽 목표 속도 (에러 해결)
+volatile float target_rpm_R = 0.0; // 오른쪽 목표 속도 (에러 해결)
 
 int16_t cnt_now_L = 0;
 
@@ -161,7 +168,7 @@ float RPM_R = 0.0;
 
 //제어기 게인
 
-float Kp = 1.4f, ki = 1.42f, kd = 0.3f;
+float Kp = 2.2f, ki = 2.05f, kd = 0.0f;
 
 float error_L = 0, error_L_prev = 0, error_L_sum = 0;
 
@@ -169,11 +176,11 @@ float error_R = 0, error_R_prev = 0, error_R_sum = 0;
 
 float pid_output_L = 0, pid_output_R = 0;
 
-volatile int16_t encoder_test=0;
-volatile float final_pwm_L=0.0f;
-volatile float final_pwm_R=0.0f;
-volatile uint32_t prev_time=0;
-volatile bool tx_ready=false;
+volatile int16_t encoder_test = 0;
+volatile float final_pwm_L = 0.0f;
+volatile float final_pwm_R = 0.0f;
+volatile uint32_t prev_time = 0;
+volatile bool tx_ready = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -186,6 +193,7 @@ static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM10_Init(void);
+static void MX_USART6_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -193,9 +201,7 @@ static void MX_TIM10_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-
 // 엔코더 카운터 읽기 (오버플로 처리 포함)
-
 int32_t read_encoder(TIM_HandleTypeDef *htim)
 
 {
@@ -242,6 +248,7 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM4_Init();
   MX_TIM10_Init();
+  MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
 
 	HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL); // Left
@@ -267,6 +274,11 @@ int main(void)
 
 	printf("UART1 Interrupt Started!\r\n");
 
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, PWM_CLOSE);
+	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+
+	HAL_UART_Receive_IT(&huart6, &rx_byte, 1);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -284,7 +296,6 @@ int main(void)
 // cat /dev/ttyS0
 //sprintf: 변수 -> 버퍼 (쓰기)
 // sscanf: 버퍼 -> 변수 (읽기 + 쓰기)
-
 		if (cmd_complete)
 
 		{
@@ -304,6 +315,8 @@ int main(void)
 				printf(">>> SUCCESS! L:%.2f, R:%.2f\r\n", target_rpm_L,
 						target_rpm_R);
 
+				prev_time = HAL_GetTick();
+
 			}
 
 			else
@@ -315,20 +328,20 @@ int main(void)
 			}
 
 			cmd_complete = 0; //한바이트 데이터 출력 받았으니 다시 플레그변수0으로 초기화
-             prev_time=HAL_GetTick();
 
 		}
-		if(tx_ready)
-		    {
-		        tx_ready = 0;
-		        if(huart1.gState == HAL_UART_STATE_READY) {
-		            HAL_UART_Transmit(&huart1, (uint8_t*)tx_buf, strlen(tx_buf),10);
-		            __HAL_UART_DISABLE_IT(&huart1, UART_IT_TXE);
-		            __HAL_UART_DISABLE_IT(&huart1, UART_IT_TC);
-		            __HAL_UART_CLEAR_FLAG(&huart1, UART_FLAG_TC);
-		        }
-		    }
-
+		if (tx_ready)
+		{
+			tx_ready = 0;
+			if (huart1.gState == HAL_UART_STATE_READY)
+			{
+				HAL_UART_Transmit(&huart1, (uint8_t*) tx_buf, strlen(tx_buf),
+						10);
+				__HAL_UART_DISABLE_IT(&huart1, UART_IT_TXE);
+				__HAL_UART_DISABLE_IT(&huart1, UART_IT_TC);
+				__HAL_UART_CLEAR_FLAG(&huart1, UART_FLAG_TC);
+			}
+		}
 
 	}
 
@@ -469,9 +482,9 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
+  htim2.Init.Prescaler = 83;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 4294967295;
+  htim2.Init.Period = 19999;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
@@ -485,10 +498,14 @@ static void MX_TIM2_Init(void)
     Error_Handler();
   }
   sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
+  sConfigOC.Pulse = 1000;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -695,6 +712,39 @@ static void MX_USART2_UART_Init(void)
 }
 
 /**
+  * @brief USART6 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART6_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART6_Init 0 */
+
+  /* USER CODE END USART6_Init 0 */
+
+  /* USER CODE BEGIN USART6_Init 1 */
+
+  /* USER CODE END USART6_Init 1 */
+  huart6.Instance = USART6;
+  huart6.Init.BaudRate = 115200;
+  huart6.Init.WordLength = UART_WORDLENGTH_8B;
+  huart6.Init.StopBits = UART_STOPBITS_1;
+  huart6.Init.Parity = UART_PARITY_NONE;
+  huart6.Init.Mode = UART_MODE_TX_RX;
+  huart6.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart6.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart6) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART6_Init 2 */
+
+  /* USER CODE END USART6_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -744,24 +794,31 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-int __io_putchar(int ch) {
-    HAL_UART_Transmit(&huart2, (uint8_t*)&ch, 1, HAL_MAX_DELAY);
-    return ch;
+int __io_putchar(int ch)
+{
+	HAL_UART_Transmit(&huart2, (uint8_t*) &ch, 1, HAL_MAX_DELAY);
+	return ch;
 }
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
-    printf("stm32 error call back 진입 직후\r\n");
-    printf("SR: %lu\r\n", USART1->SR);
-    if (huart->Instance == USART1) {
-        __HAL_UART_DISABLE_IT(huart, UART_IT_TXE);
-        __HAL_UART_DISABLE_IT(huart, UART_IT_TC);
-        __HAL_UART_CLEAR_FLAG(huart, UART_FLAG_TC);
-        __HAL_UART_CLEAR_OREFLAG(huart);
-        __HAL_UART_CLEAR_NEFLAG(huart);
-        __HAL_UART_CLEAR_FEFLAG(huart);
-        HAL_UART_Receive_IT(huart, &rx_data, 1);
-    }
+	printf("stm32 error call back 진입 직후\r\n");
+	printf("SR: %lu\r\n", USART1->SR);
+	if (huart->Instance == USART1)
+	{
+		__HAL_UART_DISABLE_IT(huart, UART_IT_TXE);
+		__HAL_UART_DISABLE_IT(huart, UART_IT_TC);
+		__HAL_UART_CLEAR_FLAG(huart, UART_FLAG_TC);
+		__HAL_UART_CLEAR_OREFLAG(huart);
+		__HAL_UART_CLEAR_NEFLAG(huart);
+		__HAL_UART_CLEAR_FEFLAG(huart);
+		huart->RxState = HAL_UART_STATE_READY;
+		huart->gState = HAL_UART_STATE_READY;
+		huart->ErrorCode = HAL_UART_ERROR_NONE;
+		HAL_UART_Receive_IT(huart, &rx_data, 1);
+	}
+
 }
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 {
@@ -772,15 +829,17 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 	if (htim->Instance == TIM10) //TIM10이 불렀다면=> tim10은 0.5초마다 콜백이 불림. 시계 역할.
 //millis-prev>=500
-	{   //printf("타이머10 50ms콜백 진입직후\r\n");
-       if(HAL_GetTick()-prev_time>=cmd_timeout_us)
-       {
-    	   target_rpm_L=0.0;
-    	   target_rpm_R=0.0;
-       }
-		cnt_now_L = read_encoder(&htim3);
+	{
+		tim10_cnt++;
+		//printf("타이머10 50ms콜백 진입직후\r\n");
+		if (HAL_GetTick() - prev_time >= cmd_timeout_us)
+		{
+			target_rpm_L = 0.0;
+			target_rpm_R = 0.0;
+		}
+		cnt_now_L = -read_encoder(&htim3);
 
-		cnt_now_R = read_encoder(&htim4);
+		cnt_now_R = -read_encoder(&htim4);
 
 		delta_cnt_L = (int16_t) (cnt_now_L - cnt_prev_L);
 
@@ -815,28 +874,34 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 		if (error_R_sum < -2000)
 			error_R_sum = -2000;
-		if (fabs(target_rpm_L) < 0.1f) { // 목표 속도가 0이면
-					error_L_sum = 0;             // 누적 오차 초기화
-					error_L_prev = 0;
-					pid_output_L = 0;
-					final_pwm_L = 0;             // 출력 완전 차단
-				} else {
-					pid_output_L = (Kp * error_L) + (ki * error_L_sum * 0.05f)
-							+ (kd * (error_L - error_L_prev) / 0.05f);
-					final_pwm_L = (((target_rpm_L) / 333.0f) * 999.0f) + pid_output_L;
-				}
+		if (fabs(target_rpm_L) < 0.1f)
+		{ // 목표 속도가 0이면
+			error_L_sum = 0;             // 누적 오차 초기화
+			error_L_prev = 0;
+			pid_output_L = 0;
+			final_pwm_L = 0;             // 출력 완전 차단
+		}
+		else
+		{
+			pid_output_L = (Kp * error_L) + (ki * error_L_sum * 0.05f)
+					+ (kd * (error_L - error_L_prev) / 0.05f);
+			final_pwm_L = (((target_rpm_L) / 333.0f) * 999.0f) + pid_output_L;
+		}
 
-				//오른쪽 모터 제어
-				if (fabs(target_rpm_R) < 0.1f) {
-					error_R_sum = 0;
-					error_R_prev = 0;
-					pid_output_R = 0;
-					final_pwm_R = 0;
-				} else {
-					pid_output_R = (Kp * error_R) + (ki * error_R_sum * 0.05f)
-							+ (kd * (error_R - error_R_prev) / 0.05f);
-					final_pwm_R = (((target_rpm_R) / 333.0f) * 999.0f) + pid_output_R;
-				}
+		//오른쪽 모터 제어
+		if (fabs(target_rpm_R) < 0.1f)
+		{
+			error_R_sum = 0;
+			error_R_prev = 0;
+			pid_output_R = 0;
+			final_pwm_R = 0;
+		}
+		else
+		{
+			pid_output_R = (Kp * error_R) + (ki * error_R_sum * 0.05f)
+					+ (kd * (error_R - error_R_prev) / 0.05f);
+			final_pwm_R = (((target_rpm_R) / 333.0f) * 999.0f) + pid_output_R;
+		}
 		HAL_GPIO_WritePin(GPIOB, MOTOR_L_DIR_Pin,
 				(final_pwm_L >= 0) ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
@@ -849,12 +914,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 //흐르는 전류값(모터속도 제어)
 
-
-		final_pwm_L=fabs(final_pwm_L);
-		final_pwm_R=fabs(final_pwm_R);
+		final_pwm_L = fabs(final_pwm_L);
+		final_pwm_R = fabs(final_pwm_R);
 		if (final_pwm_L > 999)
 			final_pwm_L = 999;
-
 
 		if (final_pwm_R > 999)
 			final_pwm_R = 999;
@@ -862,7 +925,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		target_pwm_value_L = (uint32_t) final_pwm_L;
 
 		target_pwm_value_R = (uint32_t) final_pwm_R;
-
 
 		if (target_pwm_value_L > 999)
 			target_pwm_value_L = 999;
@@ -876,7 +938,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 //방향 핀에 값 인가
 
-		sprintf(tx_buf, "F%.2f,%.2f\n", RPM_L, RPM_R);
+		sprintf(tx_buf, "F%.2f,%.2f,%lu\n", RPM_L, RPM_R, tim10_cnt);
 		tx_ready = true;
 		error_L_prev = error_L;
 
@@ -892,7 +954,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 {
-   //printf("rx콜백함수 진입직후\r\n");
+	//printf("rx콜백함수 진입직후\r\n");
 	if (huart->Instance == USART1)
 
 	{
@@ -929,6 +991,23 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 		HAL_UART_Receive_IT(huart, &rx_data, 1);
 
+	}
+	if (huart->Instance == USART6)
+	{
+		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);   // <- LD2 토글 (진단용)
+		if (rx_byte == CMD_OPEN)
+		{
+			__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, PWM_OPEN);
+			__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PWM_OPEN);
+
+		}
+		else if (rx_byte == CMD_CLOSE)
+		{
+			__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, PWM_CLOSE);
+			__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PWM_CLOSE);
+
+		}
+		HAL_UART_Receive_IT(&huart6, &rx_byte, 1);
 	}
 
 }
