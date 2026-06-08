@@ -103,11 +103,11 @@
 #define SAMPLE_PERIOD_MS 50
 
 #define cmd_timeout_us 500
-#define CMD_OPEN 0x01
-#define CMD_CLOSE 0x02
+#define CMD_OPEN 0x02
+#define CMD_CLOSE 0x01
 
-#define PWM_CLOSE 750
-#define PWM_OPEN 2500
+#define PWM_CLOSE 700
+#define PWM_OPEN 1900
 
 /* USER CODE END PD */
 
@@ -181,6 +181,10 @@ volatile float final_pwm_L = 0.0f;
 volatile float final_pwm_R = 0.0f;
 volatile uint32_t prev_time = 0;
 volatile bool tx_ready = false;
+
+volatile int PWM_lid = 550;
+volatile bool lid_open = false;
+volatile bool lid_close = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -274,8 +278,7 @@ int main(void)
 
 	printf("UART1 Interrupt Started!\r\n");
 
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, PWM_CLOSE);
-	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PWM_CLOSE);
 	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
 	HAL_UART_Receive_IT(&huart6, &rx_byte, 1);
 
@@ -827,10 +830,42 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 //ENCR A/B:PB67
 
-	if (htim->Instance == TIM10) //TIM10이 불렀다면=> tim10은 0.5초마다 콜백이 불림. 시계 역할.
+	if (htim->Instance == TIM10) //TIM10이 불렀다면=> tim10은 0.05(50ms)초마다 콜백이 불림. 시계 역할.
 //millis-prev>=500
 	{
 		tim10_cnt++;
+		if (lid_open)
+		{
+
+			if (PWM_lid < PWM_OPEN)
+			{
+				__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PWM_lid);
+				PWM_lid += 25;
+			}
+			if (PWM_lid >= PWM_OPEN)
+			{
+				lid_open = false;
+
+			}
+		}
+
+      if(lid_close)
+      {
+
+           if(PWM_lid>PWM_CLOSE)
+           {
+             __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PWM_lid);
+             PWM_lid -=25;
+           }
+
+           if(PWM_lid <= PWM_CLOSE)
+           {
+        	 lid_close=false;
+           }
+      }
+
+
+
 		//printf("타이머10 50ms콜백 진입직후\r\n");
 		if (HAL_GetTick() - prev_time >= cmd_timeout_us)
 		{
@@ -954,7 +989,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 {
-	//printf("rx콜백함수 진입직후\r\n");
+//printf("rx콜백함수 진입직후\r\n");
 	if (huart->Instance == USART1)
 
 	{
@@ -997,15 +1032,16 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);   // <- LD2 토글 (진단용)
 		if (rx_byte == CMD_OPEN)
 		{
-			__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, PWM_OPEN);
-			__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PWM_OPEN);
+			lid_open = true;
+			lid_close = false;
+			//__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PWM_OPEN);
 
 		}
 		else if (rx_byte == CMD_CLOSE)
 		{
-			__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, PWM_CLOSE);
-			__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PWM_CLOSE);
-
+			lid_open = false;
+			lid_close = true;
+			//__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PWM_CLOSE);
 		}
 		HAL_UART_Receive_IT(&huart6, &rx_byte, 1);
 	}
